@@ -3,8 +3,13 @@
 Classroom notebooks for an 8-week, English-medium course at National Cheng Kung University (NCKU).
 Students run them in Google Colab. No installation and no coding experience are needed.
 
-**How to use:** click a badge below. In Colab, choose **Runtime > Run all**, or run one cell at a time with **Shift + Enter**.
-Each notebook ends with a cell that prints **CHECK PASSED**.
+**How to use:**
+
+1. Click an **Open in Colab** badge below. Sign in with your Google account if asked.
+2. Choose **File > Save a copy in Drive**. Work in your copy; otherwise your changes are lost when you close the tab.
+3. Run the notebook: **Runtime > Run all**, or one cell at a time with **Shift + Enter**.
+   If Colab warns that the notebook was not authored by Google, click **Run anyway**.
+4. Scroll to the end. The last check cell prints **CHECK PASSED** when everything worked.
 
 ## The notebooks
 
