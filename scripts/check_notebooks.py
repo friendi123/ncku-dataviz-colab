@@ -55,6 +55,23 @@ def require(text: str, phrases: list[str], where: str) -> None:
     assert not missing, f"{where}: missing {missing}"
 
 
+def statements(src: str) -> list[tuple[int, int]]:
+    """(first line, last line) of every logical statement in a code cell."""
+    import io
+    import tokenize
+
+    spans, first = [], None
+    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+        if tok.type in (tokenize.COMMENT, tokenize.NL, tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER):
+            continue
+        if first is None:
+            first = tok.start[0]
+        if tok.type == tokenize.NEWLINE:
+            spans.append((first, tok.start[0]))
+            first = None
+    return spans
+
+
 # ---------- format rules (all notebooks) ----------
 
 def check_format(nb_path: Path) -> None:
@@ -70,16 +87,11 @@ def check_format(nb_path: Path) -> None:
     assert "CHECK PASSED" in codes[-2], f"{name}: second-to-last code cell must be the verify cell"
     for i, src in enumerate(codes):
         lines = src.splitlines()
-        for j, line in enumerate(lines):
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            inline = "  #" in line
-            above = j > 0 and lines[j - 1].strip().startswith("#")
-            prev_code = re.sub(r"\s+#.*$", "", lines[j - 1]).rstrip() if j > 0 else ""
-            continuation = prev_code.endswith(("(", "[", "{", ",", "\\"))
-            closer = stripped in (")", "]", "}", "})", "])", "),")
-            assert inline or above or continuation or closer, f"{name} code cell {i}: uncommented line {line!r}"
+        for first, last in statements(src):
+            span = lines[first - 1 : last]
+            above = first > 1 and lines[first - 2].strip().startswith("#")
+            commented = any(re.search(r"(^|\s)#", ln) for ln in span)
+            assert commented or above, f"{name} code cell {i}: statement without a comment: {span[0]!r}"
         for line in lines:
             if "http" in line and not re.match(r"\s*[A-Z_]+\s*=\s*\"http", line):
                 raise AssertionError(f"{name}: URL outside a settings constant: {line!r}")
@@ -158,6 +170,56 @@ def check_nb02() -> None:
     assert stored.exists(), "copy the generated clean CSV into data/"
     assert (workdir / CLEAN_CSV).read_bytes() == stored.read_bytes(), "data/ clean CSV differs from notebook output"
     assert (workdir / LONG_CSV).read_bytes() == (DATA / LONG_CSV).read_bytes(), "data/ long CSV differs"
+
+
+FIVE_BLOCKS = ["Research question", "Why a t-test fits", "Hypotheses", "Look first", "How to report it"]
+
+
+def fmt_p(p: float) -> str:
+    """Same p-value format the notebook uses."""
+    return "< 0.001" if p < 0.001 else f"= {p:.3f}"
+
+
+def check_nb03() -> None:
+    import numpy as np
+    import pandas as pd
+    from scipy import stats
+
+    nb_path = NOTEBOOKS / "03_ttest_airbnb.ipynb"
+    nb = nbformat.read(nb_path, as_version=4)
+    text = all_text(nb)
+    require(text, ["Stats in 5 minutes", "Choosing a test", "Going further", "p-value (p 值)", "Cohen's d"], "nb03 text")
+    parts = re.split(r"\n## Part ", "\n" + "\n".join(md_cells(nb)))
+    core = {int(p[0]): p for p in parts[1:] if p[0] in "1234"}
+    assert sorted(core) == [1, 2, 3, 4], f"core parts found: {sorted(core)}"
+    for n in (1, 3, 4):
+        require(core[n], FIVE_BLOCKS + ["You are here", "Stuck?"], f"nb03 Part {n}")
+    require(core[2], ["Research question", "You are here", "Stuck?"], "nb03 Part 2")
+    verify = code_cells(nb)[-2]
+    assert "mannwhitney" not in verify.lower() and "wilcoxon" not in verify.lower(), "verify cell must cover core only"
+
+    out = run_twice(nb_path, local_data())
+
+    # Independent recomputation from the stored clean file
+    d = pd.read_csv(DATA / CLEAN_CSV)
+    p = d[d["price"].notna() & d["host_is_superhost"].notna()]
+    sh, other = p.loc[p.host_is_superhost == "t", "price"], p.loc[p.host_is_superhost == "f", "price"]
+    t1 = stats.ttest_ind(sh, other, equal_var=False)
+    assert t1.pvalue < 0.05 and other.mean() > sh.mean(), "Part 1 expectation changed"
+    q = p[~p["price_outlier"]]
+    t2 = stats.ttest_ind(q.loc[q.host_is_superhost == "t", "price"], q.loc[q.host_is_superhost == "f", "price"], equal_var=False)
+    assert t2.pvalue > 0.05, "Part 2 expectation changed (ledger: p = 0.638)"
+    r = d.dropna(subset=["review_scores_cleanliness", "review_scores_location"])
+    diff = r.review_scores_cleanliness - r.review_scores_location
+    t3 = stats.ttest_rel(r.review_scores_cleanliness, r.review_scores_location)
+    d3 = diff.mean() / diff.std(ddof=1)
+    assert t3.pvalue < 0.001 and abs(d3) < 0.2, "Part 3 expectation changed"
+    s = d.review_scores_rating.dropna()
+    t4 = stats.ttest_1samp(s, 4.8)
+    assert s.mean() < 4.8 and t4.pvalue < 0.001, "Part 4 expectation changed"
+    for label, pv in [("Part 1", t1.pvalue), ("Part 2", t2.pvalue), ("Part 3", t3.pvalue), ("Part 4", t4.pvalue)]:
+        assert f"p {fmt_p(pv)}" in out, f"{label}: notebook output lacks 'p {fmt_p(pv)}'"
+    require(out, [f"{len(sh):,}", f"{len(other):,}", f"{len(r):,}", f"{len(s):,}"], "nb03 sample sizes")
 
 
 # ---------- main ----------
