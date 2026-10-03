@@ -1,6 +1,6 @@
 """Small helpers for authoring notebooks as Python cell lists."""
 
-DATA_BASE = "https://raw.githubusercontent.com/friendi89/ncku-dataviz-colab/main/data/"
+DATA_BASE = "https://raw.githubusercontent.com/friendi123/ncku-dataviz-colab/main/data/"
 
 ATTRIBUTION = "Data: Inside Airbnb (insideairbnb.com), NYC snapshot 2026-06-14, CC BY 4.0."
 
