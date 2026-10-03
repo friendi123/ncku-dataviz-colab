@@ -136,6 +136,30 @@ def check_nb01() -> None:
     require(all_text(nb), ["Check:", "problems found"], "nb01 text")
 
 
+CLEAN_CSV = "nyc_listings_clean_2026-06-14.csv"
+LONG_CSV = "nyc_review_scores_long_2026-06-14.csv"
+
+
+def check_nb02() -> None:
+    nb_path = NOTEBOOKS / "02_clean_airbnb.ipynb"
+    out = run_twice(nb_path, local_data())
+    moves = re.findall(r"Move (\d+) .*rows before: ([\d,]+) \| rows after: ([\d,]+)", out)
+    assert sorted({int(m[0]) for m in moves}) == list(range(1, 11)), f"moves reported: {moves}"
+    import pandas as pd
+
+    workdir = Path(re.search(r"Saved to (.+)", out).group(1).strip()).parent
+    made = pd.read_csv(workdir / CLEAN_CSV)
+    assert len(made) == 30259, f"clean file has {len(made)} rows"
+    assert pd.api.types.is_numeric_dtype(made["price"]), "price is not numeric"
+    assert made["reviews_per_month"].isna().sum() == 0, "reviews_per_month still has gaps"
+    for col in ["bathrooms_count", "bathroom_shared", "has_wifi", "price_missing", "price_outlier", "area_label"]:
+        assert col in made.columns, f"missing column {col}"
+    stored = DATA / CLEAN_CSV
+    assert stored.exists(), "copy the generated clean CSV into data/"
+    assert (workdir / CLEAN_CSV).read_bytes() == stored.read_bytes(), "data/ clean CSV differs from notebook output"
+    assert (workdir / LONG_CSV).read_bytes() == (DATA / LONG_CSV).read_bytes(), "data/ long CSV differs"
+
+
 # ---------- main ----------
 
 def main() -> None:
