@@ -113,12 +113,12 @@ def with_overrides(nb, overrides: dict[str, str]):
     return nb
 
 
-def execute(nb_path: Path, overrides: dict[str, str]):
+def execute(nb_path: Path, overrides: dict[str, str], allow_errors: bool = False):
     """Run a temporary copy of the notebook; return the executed notebook."""
     nb = nbformat.read(nb_path, as_version=4)
     nb = with_overrides(nb, overrides)
     workdir = Path(tempfile.mkdtemp(prefix="nbcheck_"))
-    client = NotebookClient(nb, timeout=1800, kernel_name="python3", resources={"metadata": {"path": str(workdir)}})
+    client = NotebookClient(nb, timeout=1800, kernel_name="python3", resources={"metadata": {"path": str(workdir)}}, allow_errors=allow_errors)
     client.execute()
     nb.metadata["_workdir"] = str(workdir)
     return nb
@@ -220,6 +220,46 @@ def check_nb03() -> None:
     for label, pv in [("Part 1", t1.pvalue), ("Part 2", t2.pvalue), ("Part 3", t3.pvalue), ("Part 4", t4.pvalue)]:
         assert f"p {fmt_p(pv)}" in out, f"{label}: notebook output lacks 'p {fmt_p(pv)}'"
     require(out, [f"{len(sh):,}", f"{len(other):,}", f"{len(r):,}", f"{len(s):,}"], "nb03 sample sizes")
+
+
+BIKE_CASES = {
+    "YouBike": {"CITY": "YouBike", "MONTH": "2026-07", "WEEK_START": "2026-07-06",
+                "YOUBIKE_URL_TEMPLATE": (CACHE / "youbike_202607.zip").as_posix(),
+                "YOUBIKE_STATIONS_URL": (CACHE / "youbike_stations.json").as_posix()},
+    "Bluebikes": {"CITY": "Bluebikes", "MONTH": "2026-08", "WEEK_START": "2026-08-03",
+                  "BLUEBIKES_URL_TEMPLATE": (CACHE / "bluebikes_202608.zip").as_posix()},
+}
+BIKE_WEEK_TOTALS = {"YouBike": 1338920, "Bluebikes": 124721}  # verified in Task 2 (data/README.md)
+FAIL_MESSAGE = "The download failed. Try again, or ask your instructor for the backup file."
+
+
+def check_nb04() -> None:
+    import pandas as pd
+
+    nb_path = NOTEBOOKS / "04_bike_week.ipynb"
+    nb = nbformat.read(nb_path, as_version=4)
+    text = all_text(nb)
+    for banned in ["Airbnb", "Week 4", "Week 5", "Week 6", "Notebook 0"]:
+        assert banned not in text, f"nb04 must be stand-alone: found {banned!r}"
+    require(text, ["Assignment brief", "Deliverables", "Rubric", "For instructors", "aggregated"], "nb04 text")
+    for city, overrides in BIKE_CASES.items():
+        out = run_twice(nb_path, overrides)
+        total = BIKE_WEEK_TOTALS[city]
+        require(out, [f"Trips in the chosen week: {total:,}"], f"nb04 {city}")
+        workdir = Path(re.search(r"Saved to (.+)", out).group(1).strip()).parent
+        hourly = pd.read_csv(next(workdir.glob("*_station_hour.csv")))
+        pairs = pd.read_csv(next(workdir.glob("*_station_pairs.csv")))
+        assert hourly["trips"].sum() == total, f"{city}: station-hour table sums to {hourly['trips'].sum()}"
+        assert pairs["trips"].sum() == total, f"{city}: station-pairs table sums to {pairs['trips'].sum()}"
+        for col in ["start_lat", "start_lng", "end_lat", "end_lng"]:
+            assert col in pairs.columns, f"{city}: pairs table lacks {col}"
+        if city == "YouBike":
+            assert hourly["station"].str.contains("捷運").any(), "YouBike station names garbled"
+    bad = dict(BIKE_CASES["Bluebikes"], BLUEBIKES_URL_TEMPLATE="https://invalid.invalid/none.zip")
+    failed = execute(nb_path, bad, allow_errors=True)
+    errors = [o for c in failed.cells for o in c.get("outputs", []) if o.get("output_type") == "error"]
+    assert errors and errors[0]["ename"] == "SystemExit", f"bad download should stop with SystemExit, got {errors[:1]}"
+    assert FAIL_MESSAGE in outputs_text(failed), "friendly download message missing"
 
 
 # ---------- main ----------
