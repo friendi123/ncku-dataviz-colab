@@ -76,7 +76,8 @@ def check_format(nb_path: Path) -> None:
                 continue
             inline = "  #" in line
             above = j > 0 and lines[j - 1].strip().startswith("#")
-            continuation = j > 0 and lines[j - 1].rstrip().endswith(("(", "[", "{", ",", "\\"))
+            prev_code = re.sub(r"\s+#.*$", "", lines[j - 1]).rstrip() if j > 0 else ""
+            continuation = prev_code.endswith(("(", "[", "{", ",", "\\"))
             closer = stripped in (")", "]", "}", "})", "])", "),")
             assert inline or above or continuation or closer, f"{name} code cell {i}: uncommented line {line!r}"
         for line in lines:
@@ -113,6 +114,26 @@ def execute(nb_path: Path, overrides: dict[str, str]):
 
 def local_data() -> dict[str, str]:
     return {} if ONLINE else {"DATA_BASE": DATA.as_posix() + "/"}
+
+
+# ---------- per-notebook checks ----------
+
+def run_twice(nb_path: Path, overrides: dict[str, str]) -> str:
+    """Execute twice in a row (students rerun cells); both must pass. Return output of run 2."""
+    first = outputs_text(execute(nb_path, overrides))
+    assert "CHECK PASSED" in first, f"{nb_path.name} run 1 did not pass:\n{first[-1500:]}"
+    second = outputs_text(execute(nb_path, overrides))
+    assert "CHECK PASSED" in second, f"{nb_path.name} run 2 did not pass:\n{second[-1500:]}"
+    assert "ERROR" not in second, f"{nb_path.name}: error in output"
+    return second
+
+
+def check_nb01() -> None:
+    nb_path = NOTEBOOKS / "01_profile_airbnb.ipynb"
+    out = run_twice(nb_path, local_data())
+    require(out, ["30,259 rows", "90 columns", "Missing price: 29", "Duplicate listing IDs: 0"], "nb01 output")
+    nb = nbformat.read(nb_path, as_version=4)
+    require(all_text(nb), ["Check:", "problems found"], "nb01 text")
 
 
 # ---------- main ----------
